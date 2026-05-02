@@ -1,0 +1,22 @@
+# Note: Actions are pinned to major version tags (e.g. @v4).
+# For supply-chain hardening in production forks, consider pinning to full SHA digests
+# and enabling Dependabot for github-actions to keep them updated.
+name: Release Please
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run release-please
+        uses: googleapis/release-please-action@v4
+        with:
+          release-type: node
+          token: ${{ secrets.GITHUB_TOKEN }}

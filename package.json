@@ -1,0 +1,58 @@
+{
+  "name": "claude-openai-wrapper",
+  "version": "0.1.0",
+  "description": "Local OpenAI-compatible HTTP/SSE wrapper for Claude Code Agent SDK and CLI fallback.",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "claude-openai-wrapper": "dist/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "dev": "bun run src/index.ts",
+    "build": "bun build src/index.ts --target=node --outdir=dist && bun run scripts/postbuild.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test ./src/__tests__/*.test.ts",
+    "audit": "bun audit --audit-level high",
+    "check:version": "bun run scripts/check-version.ts",
+    "ci": "bun run typecheck && bun run test && bun run audit && bun run check:version && bun run build",
+    "prepublishOnly": "bun run ci"
+  },
+  "keywords": [
+    "claude",
+    "claude-code",
+    "openai-compatible",
+    "sse",
+    "bun",
+    "effect"
+  ],
+  "author": "daongoc315",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/daongoc315/claude-openai-wrapper.git"
+  },
+  "bugs": {
+    "url": "https://github.com/daongoc315/claude-openai-wrapper/issues"
+  },
+  "homepage": "https://github.com/daongoc315/claude-openai-wrapper#readme",
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.2.126",
+    "async-mutex": "^0.5.0",
+    "effect": "^3.21.2",
+    "execa": "^9.6.1",
+    "p-queue": "^9.2.0"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.3",
+    "typescript": "^5.9.3"
+  }
+}

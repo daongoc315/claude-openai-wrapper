@@ -1,0 +1,26 @@
+services:
+  claude-openai-wrapper:
+    build: .
+    ports:
+      # Bind to loopback by default. Do not expose this service publicly.
+      - "127.0.0.1:8000:8000"
+    environment:
+      CLAUDE_WRAPPER_HOST: 0.0.0.0
+      CLAUDE_WRAPPER_PORT: 8000
+      CLAUDE_WRAPPER_API_KEY: ${CLAUDE_WRAPPER_API_KEY:-dev-local-key}
+      CLAUDE_WRAPPER_ALLOWED_WORKING_DIR_PREFIXES: /workspace
+      CLAUDE_CONFIG_DIR: /home/node/.claude
+      CLAUDE_COMMAND: claude
+    volumes:
+      # Mount your project(s) here, then use claude.workingDirectory=/workspace/<project>.
+      - ${CLAUDE_WORKSPACE:-.}:/workspace:rw
+      # Claude Code auth/config mounts. These paths cover common file-backed installs.
+      # If your Claude Code login uses OS keychain storage, login inside the container
+      # or use an official API/cloud auth path instead.
+      - ${HOME}/.claude:/home/node/.claude:rw
+      - ${HOME}/.config/claude:/home/node/.config/claude:rw
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
