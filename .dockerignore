@@ -1,0 +1,13 @@
+.git
+.github
+.opencode
+github.com
+node_modules
+dist
+.DS_Store
+.env
+.env.*
+*.local
+opencode.json
+npm-debug.log*
+bun-error.log

@@ -1,0 +1,71 @@
+# Note: Actions are pinned to major version tags (e.g. @v4).
+# For supply-chain hardening in production forks, consider pinning to full SHA digests
+# and enabling Dependabot for github-actions to keep them updated.
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    name: Typecheck, Test & Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Typecheck
+        run: bun run typecheck
+
+      - name: Test
+        run: bun run test
+
+      - name: Audit dependencies
+        run: bun run audit
+
+      - name: Check package/server version sync
+        run: bun run check:version
+
+      - name: Build
+        run: bun run build
+
+      - name: Upload dist artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          retention-days: 1
+
+  smoke:
+    name: Smoke test (Node ${{ matrix.node-version }})
+    needs: quality
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [20, 22]
+    steps:
+      - name: Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+
+      - name: Download dist artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Verify binary runs on Node ${{ matrix.node-version }}
+        run: node dist/index.js --version
