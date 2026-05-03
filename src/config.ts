@@ -1,7 +1,7 @@
 import { Schema } from "effect";
 
-const splitCsvEnv = (name: string, fallback: readonly string[]): readonly string[] => {
-  const raw = process.env[name];
+const splitCsvEnv = (name: string | readonly string[], fallback: readonly string[]): readonly string[] => {
+  const raw = typeof name === "string" ? process.env[name] : firstEnv(name);
   if (!raw) return fallback;
   return raw
     .split(",")
@@ -50,6 +50,9 @@ export const ConfigSchema = Schema.Struct({
   maxOutputBytes: Schema.Number,
   maxReturnedErrorBytes: Schema.Number,
   sessionIdleTtlMs: Schema.Number,
+  maxSessions: Schema.Number,
+  maxSessionMessages: Schema.Number,
+  maxSessionContentChars: Schema.Number,
   lockWaitTimeoutMs: Schema.Number,
   shutdownGraceMs: Schema.Number,
 });
@@ -57,30 +60,33 @@ export const ConfigSchema = Schema.Struct({
 export type AppConfig = Schema.Schema.Type<typeof ConfigSchema>;
 
 export const appConfig: AppConfig = {
-  claudeCommand: stringFromEnv(["CLAUDE_WRAPPER_CLAUDE_COMMAND", "CLAUDE_COMMAND"], "claude"),
-  backend: stringFromEnv("CLAUDE_WRAPPER_BACKEND", "sdk") === "cli" ? "cli" : "sdk",
-  httpHost: stringFromEnv("CLAUDE_WRAPPER_HOST", "127.0.0.1"),
-  httpPort: numberFromEnv(["CLAUDE_WRAPPER_PORT", "PORT"], 8000),
-  apiKey: firstEnv(["CLAUDE_WRAPPER_API_KEY", "API_KEY"]),
-  allowedPermissionModes: splitCsvEnv("CLAUDE_WRAPPER_ALLOWED_PERMISSION_MODES", ["acceptEdits", "auto", "default", "plan"]),
-  allowedWorkingDirectoryPrefixes: splitCsvEnv("CLAUDE_WRAPPER_ALLOWED_WORKING_DIR_PREFIXES", [process.cwd()]),
-  defaultModel: stringFromEnv(["CLAUDE_DEFAULT_MODEL", "CLAUDE_WRAPPER_DEFAULT_MODEL"], "sonnet"),
+  claudeCommand: stringFromEnv(["CLAUDE_OPENAI_CLAUDE_COMMAND", "CLAUDE_COMMAND"], "claude"),
+  backend: stringFromEnv("CLAUDE_OPENAI_BACKEND", "sdk") === "cli" ? "cli" : "sdk",
+  httpHost: stringFromEnv("CLAUDE_OPENAI_HOST", "127.0.0.1"),
+  httpPort: numberFromEnv(["CLAUDE_OPENAI_PORT", "PORT"], 8000),
+  apiKey: firstEnv(["CLAUDE_OPENAI_API_KEY", "API_KEY"]),
+  allowedPermissionModes: splitCsvEnv("CLAUDE_OPENAI_ALLOWED_PERMISSION_MODES", ["acceptEdits", "auto", "default", "plan"]),
+  allowedWorkingDirectoryPrefixes: splitCsvEnv("CLAUDE_OPENAI_ALLOWED_WORKING_DIR_PREFIXES", [process.cwd()]),
+  defaultModel: stringFromEnv(["CLAUDE_DEFAULT_MODEL", "CLAUDE_OPENAI_DEFAULT_MODEL"], "sonnet"),
   models: splitCsvEnv("CLAUDE_MODELS_OVERRIDE", ["claude", "claude-haiku", "claude-sonnet", "claude-opus", "sonnet", "opus", "haiku"]),
-  maxRequestBytes: numberFromEnv("CLAUDE_WRAPPER_MAX_REQUEST_BYTES", 10 * 1024 * 1024),
+  maxRequestBytes: numberFromEnv("CLAUDE_OPENAI_MAX_REQUEST_BYTES", 10 * 1024 * 1024),
   corsOrigins: splitCsvEnv("CORS_ORIGINS", ["*"]),
-  maxConcurrentClaudeProcesses: numberFromEnv("CLAUDE_WRAPPER_MAX_CONCURRENCY", 2),
-  queueIntervalCap: numberFromEnv("CLAUDE_WRAPPER_QUEUE_INTERVAL_CAP", 20),
-  queueIntervalMs: numberFromEnv("CLAUDE_WRAPPER_QUEUE_INTERVAL_MS", 60_000),
-  queueTaskTimeoutMs: numberFromEnv("CLAUDE_WRAPPER_QUEUE_TASK_TIMEOUT_MS", 180_000),
-  maxQueueSize: numberFromEnv("CLAUDE_WRAPPER_MAX_QUEUE_SIZE", 100),
-  processTimeoutMs: numberFromEnv("CLAUDE_WRAPPER_PROCESS_TIMEOUT_MS", 120_000),
-  killGracePeriodMs: numberFromEnv("CLAUDE_WRAPPER_KILL_GRACE_PERIOD_MS", 5_000),
-  maxPromptBytes: numberFromEnv("CLAUDE_WRAPPER_MAX_PROMPT_BYTES", 256 * 1024),
-  maxOutputBytes: numberFromEnv("CLAUDE_WRAPPER_MAX_OUTPUT_BYTES", 10 * 1024 * 1024),
-  maxReturnedErrorBytes: numberFromEnv("CLAUDE_WRAPPER_MAX_RETURNED_ERROR_BYTES", 8 * 1024),
-  sessionIdleTtlMs: numberFromEnv("CLAUDE_WRAPPER_SESSION_TTL_MS", 30 * 60_000),
-  lockWaitTimeoutMs: numberFromEnv("CLAUDE_WRAPPER_SESSION_LOCK_TIMEOUT_MS", 30_000),
-  shutdownGraceMs: numberFromEnv("CLAUDE_WRAPPER_SHUTDOWN_GRACE_MS", 10_000),
+  maxConcurrentClaudeProcesses: numberFromEnv("CLAUDE_OPENAI_MAX_CONCURRENCY", 2),
+  queueIntervalCap: numberFromEnv("CLAUDE_OPENAI_QUEUE_INTERVAL_CAP", 20),
+  queueIntervalMs: numberFromEnv("CLAUDE_OPENAI_QUEUE_INTERVAL_MS", 60_000),
+  queueTaskTimeoutMs: numberFromEnv("CLAUDE_OPENAI_QUEUE_TASK_TIMEOUT_MS", 180_000),
+  maxQueueSize: numberFromEnv("CLAUDE_OPENAI_MAX_QUEUE_SIZE", 100),
+  processTimeoutMs: numberFromEnv("CLAUDE_OPENAI_PROCESS_TIMEOUT_MS", 120_000),
+  killGracePeriodMs: numberFromEnv("CLAUDE_OPENAI_KILL_GRACE_PERIOD_MS", 5_000),
+  maxPromptBytes: numberFromEnv("CLAUDE_OPENAI_MAX_PROMPT_BYTES", 256 * 1024),
+  maxOutputBytes: numberFromEnv("CLAUDE_OPENAI_MAX_OUTPUT_BYTES", 10 * 1024 * 1024),
+  maxReturnedErrorBytes: numberFromEnv("CLAUDE_OPENAI_MAX_RETURNED_ERROR_BYTES", 8 * 1024),
+  sessionIdleTtlMs: numberFromEnv("CLAUDE_OPENAI_SESSION_TTL_MS", 2 * 60 * 60_000),
+  maxSessions: numberFromEnv("CLAUDE_OPENAI_MAX_SESSIONS", 1000),
+  maxSessionMessages: numberFromEnv("CLAUDE_OPENAI_MAX_SESSION_MESSAGES", 100),
+  maxSessionContentChars: numberFromEnv("CLAUDE_OPENAI_MAX_SESSION_CONTENT_CHARS", 20_000),
+  lockWaitTimeoutMs: numberFromEnv("CLAUDE_OPENAI_SESSION_LOCK_TIMEOUT_MS", 30_000),
+  shutdownGraceMs: numberFromEnv("CLAUDE_OPENAI_SHUTDOWN_GRACE_MS", 10_000),
 };
 
 export const truncate = (text: string | undefined, maxBytes = appConfig.maxReturnedErrorBytes): string | undefined => {

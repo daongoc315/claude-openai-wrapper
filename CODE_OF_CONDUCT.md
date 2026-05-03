@@ -28,4 +28,4 @@ This Code of Conduct applies in all project spaces, including issues, pull reque
 
 ## Reporting
 
-Please report Code of Conduct concerns privately via [GitHub Security Advisories](https://github.com/daongoc315/claude-openai-wrapper/security/advisories/new) if sensitive details are involved. For non-sensitive moderation questions, open a GitHub issue and request maintainer contact without disclosing private details publicly.
+Please report Code of Conduct concerns privately via [GitHub Security Advisories](https://github.com/daongoc315/claude-openai/security/advisories/new) if sensitive details are involved. For non-sensitive moderation questions, open a GitHub issue and request maintainer contact without disclosing private details publicly.

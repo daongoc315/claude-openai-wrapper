@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { appConfig } from "./config.js";
-import { cleanupIdleSessionLocks, releaseSessionLock } from "./process-supervisor.js";
+import { cleanupIdleSessionLocks, cleanupSessionLockIfIdle } from "./process-supervisor.js";
 import type { SessionInfo, SessionMessage } from "./types.js";
 
 interface MutableSession {
@@ -21,6 +21,24 @@ type RecordTurnInput = {
 export class SessionStore {
   private readonly sessions = new Map<string, MutableSession>();
   private cleanupTimer: ReturnType<typeof setInterval> | undefined;
+
+  private truncateContent(content: string): string {
+    if (content.length <= appConfig.maxSessionContentChars) return content;
+    return `${content.slice(0, appConfig.maxSessionContentChars)}\n… truncated (${content.length} chars total)`;
+  }
+
+  private enforceMaxSessions(excludeId?: string): void {
+    if (this.sessions.size <= appConfig.maxSessions) return;
+    const evictionCandidates = [...this.sessions.values()]
+      .filter((session) => session.id !== excludeId)
+      .sort((a, b) => a.updatedAt.getTime() - b.updatedAt.getTime());
+
+    for (const session of evictionCandidates) {
+      if (this.sessions.size <= appConfig.maxSessions) break;
+      this.sessions.delete(session.id);
+      cleanupSessionLockIfIdle(session.id);
+    }
+  }
 
   private toInfo(session: MutableSession): SessionInfo {
     return { ...session, messages: session.messages.map((message) => ({ ...message })) };
@@ -55,6 +73,7 @@ export class SessionStore {
       messages: [],
     };
     this.sessions.set(session.id, session);
+    this.enforceMaxSessions(session.id);
     return this.toInfo(session);
   }
 
@@ -65,7 +84,7 @@ export class SessionStore {
 
   reset(id: string): void {
     this.sessions.delete(id);
-    releaseSessionLock(id);
+    cleanupSessionLockIfIdle(id);
   }
 
   cleanupIdle(now = Date.now(), ttlMs = appConfig.sessionIdleTtlMs): number {
@@ -73,7 +92,7 @@ export class SessionStore {
     for (const [id, session] of this.sessions) {
       if (now - session.updatedAt.getTime() > ttlMs) {
         this.sessions.delete(id);
-        releaseSessionLock(id);
+        cleanupSessionLockIfIdle(id);
         deleted += 1;
       }
     }
@@ -83,7 +102,8 @@ export class SessionStore {
 
   recordTurn(id: string, input: string | RecordTurnInput = {}): SessionInfo {
     const data = typeof input === "string" ? { claudeSessionId: input } : input;
-    const session = this.sessions.get(id) ?? {
+    const existingSession = this.sessions.get(id);
+    const session = existingSession ?? {
       id,
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -93,24 +113,27 @@ export class SessionStore {
 
     const now = new Date();
     const messages = [...session.messages];
-    if (data.prompt) messages.push({ role: "user", content: data.prompt, createdAt: now });
+    if (data.prompt) messages.push({ role: "user", content: this.truncateContent(data.prompt), createdAt: now });
     if (data.response) {
       messages.push({
         role: "assistant",
-        content: data.response,
+        content: this.truncateContent(data.response),
         createdAt: now,
         ...(data.claudeSessionId ? { claudeSessionId: data.claudeSessionId } : {}),
       });
     }
 
+    const cappedMessages = messages.slice(-appConfig.maxSessionMessages);
+
     const updated: MutableSession = {
       ...session,
       ...(data.claudeSessionId ? { claudeSessionId: data.claudeSessionId } : {}),
-      messages,
+      messages: cappedMessages,
       updatedAt: now,
       turns: session.turns + 1,
     };
     this.sessions.set(id, updated);
+    if (!existingSession) this.enforceMaxSessions(id);
     return this.toInfo(updated);
   }
 

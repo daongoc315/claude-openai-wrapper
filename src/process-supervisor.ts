@@ -3,13 +3,11 @@ import PQueue, { TimeoutError } from "p-queue";
 import { E_TIMEOUT, Mutex, withTimeout } from "async-mutex";
 import { Effect } from "effect";
 import { randomUUID } from "node:crypto";
-import { constants } from "node:fs";
-import { access, stat } from "node:fs/promises";
-import { realpath } from "node:fs/promises";
-import { resolve, sep } from "node:path";
 import { appConfig, truncate } from "./config.js";
+import { filteredClaudeEnv } from "./env-policy.js";
 import { ClaudeCliError } from "./errors.js";
 import { appendRunEvent, appendRunOutput, cancelRegistryRun, listRegistryRuns, outputPathFor, updateRun, writeRun, type RegistryRun } from "./run-registry.js";
+import { validateWorkingDirectory } from "./working-directory.js";
 
 export interface ProcessResult {
   readonly stdout: string;
@@ -85,7 +83,7 @@ const getSessionLock = (sessionId: string): Mutex => {
   return mutex;
 };
 
-export const releaseSessionLock = (sessionId: string): void => {
+export const cleanupSessionLockIfIdle = (sessionId: string): void => {
   const lock = sessionLocks.get(sessionId);
   if (!lock || !lock.isLocked()) sessionLocks.delete(sessionId);
 };
@@ -106,65 +104,27 @@ const byteLength = (text: string): number => Buffer.byteLength(text, "utf8");
 const inFlightCount = (): number => activeRuns.size + backgroundStartReservations + claudeQueue.size + claudeQueue.pending;
 const activeClaudeProcessCount = (): number => activeRuns.size + backgroundStartReservations + claudeQueue.pending;
 
-const envAllowlist = new Set([
-  "HOME",
-  "PATH",
-  "TMPDIR",
-  "TEMP",
-  "TMP",
-  "USER",
-  "USERNAME",
-  "SHELL",
-  "LANG",
-  "LC_ALL",
-  "ANTHROPIC_API_KEY",
-  "CLAUDE_CONFIG_DIR",
-  "CLAUDE_CODE_USE_BEDROCK",
-  "CLAUDE_CODE_USE_VERTEX",
-  "CLAUDE_CODE_MAX_OUTPUT_TOKENS",
-  "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
-]);
-
-const subprocessEnv = (): NodeJS.ProcessEnv => {
-  const env: NodeJS.ProcessEnv = {};
-  for (const [key, value] of Object.entries(process.env)) {
-    if (value === undefined) continue;
-    if (envAllowlist.has(key)) env[key] = value;
-  }
-  return env;
-};
-
-const isWithinPrefix = (candidate: string, prefix: string): boolean => {
-  const normalizedPrefix = resolve(prefix);
-  return candidate === normalizedPrefix || candidate.startsWith(`${normalizedPrefix}${sep}`);
-};
-
-export const validateWorkingDirectory = async (cwd: string): Promise<string> => {
-  const resolved = resolve(cwd);
-  const info = await stat(resolved);
-  if (!info.isDirectory()) {
-    throw new ClaudeCliError({ code: "CLAUDE_SPAWN_ERROR", message: `workingDirectory is not a directory: ${cwd}` });
-  }
-  await access(resolved, constants.R_OK | constants.X_OK);
-  const real = await realpath(resolved);
-  const allowedPrefixes = await Promise.all(appConfig.allowedWorkingDirectoryPrefixes.map((prefix) => realpath(resolve(prefix)).catch(() => resolve(prefix))));
-  if (!allowedPrefixes.some((prefix) => isWithinPrefix(real, prefix))) {
-    throw new ClaudeCliError({ code: "CLAUDE_SPAWN_ERROR", message: `workingDirectory is outside allowed prefixes: ${real}` });
-  }
-  return real;
-};
-
 const normalizeRunOptions = async <T extends ProcessRunOptions>(options: T): Promise<T> => {
   if (!options.cwd) return options;
   const cwd = await validateWorkingDirectory(options.cwd);
   return { ...options, cwd };
 };
 
-const createController = (signal?: AbortSignal): AbortController => {
+const createController = (signal?: AbortSignal): { controller: AbortController; cleanup: () => void } => {
   const controller = new AbortController();
-  if (signal?.aborted) controller.abort(signal.reason);
-  else signal?.addEventListener("abort", () => controller.abort(signal.reason), { once: true });
-  return controller;
+  if (signal?.aborted) {
+    controller.abort(signal.reason);
+    return { controller, cleanup: () => {} };
+  }
+
+  if (!signal) return { controller, cleanup: () => {} };
+
+  const onAbort = (): void => controller.abort(signal.reason);
+  signal.addEventListener("abort", onAbort, { once: true });
+  return {
+    controller,
+    cleanup: () => signal.removeEventListener("abort", onAbort),
+  };
 };
 
 const registerRun = (command: string, args: readonly string[], options: ProcessRunOptions, controller: AbortController): string => {
@@ -372,7 +332,7 @@ export const __test__ = {
 
 const runDirect = async (command: string, args: readonly string[], options: ProcessRunOptions): Promise<ProcessResult> => {
   const normalizedOptions = await normalizeRunOptions(options);
-  const controller = createController(options.signal);
+  const { controller, cleanup } = createController(options.signal);
   activeControllers.add(controller);
   const runId = registerRun(command, args, normalizedOptions, controller);
   const started = Date.now();
@@ -380,7 +340,7 @@ const runDirect = async (command: string, args: readonly string[], options: Proc
     await persistRunStart(runId, normalizedOptions.cwd);
     const result = await execa(command, [...args], {
       ...(normalizedOptions.cwd ? { cwd: normalizedOptions.cwd } : {}),
-      env: subprocessEnv(),
+      env: filteredClaudeEnv(),
       shell: false,
       stdin: "ignore",
       stdout: "pipe",
@@ -422,12 +382,13 @@ const runDirect = async (command: string, args: readonly string[], options: Proc
   } finally {
     activeRuns.delete(runId);
     activeControllers.delete(controller);
+    cleanup();
   }
 };
 
 const runDirectStreaming = async (command: string, args: readonly string[], options: StreamingProcessRunOptions): Promise<ProcessResult> => {
   const normalizedOptions = await normalizeRunOptions(options);
-  const controller = createController(options.signal);
+  const { controller, cleanup } = createController(options.signal);
   activeControllers.add(controller);
   const runId = registerRun(command, args, normalizedOptions, controller);
   const started = Date.now();
@@ -435,7 +396,7 @@ const runDirectStreaming = async (command: string, args: readonly string[], opti
     await persistRunStart(runId, normalizedOptions.cwd);
     const subprocess = execa(command, [...args], {
       ...(normalizedOptions.cwd ? { cwd: normalizedOptions.cwd } : {}),
-      env: subprocessEnv(),
+      env: filteredClaudeEnv(),
       shell: false,
       stdin: "ignore",
       stdout: "pipe",
@@ -491,6 +452,7 @@ const runDirectStreaming = async (command: string, args: readonly string[], opti
   } finally {
     activeRuns.delete(runId);
     activeControllers.delete(controller);
+    cleanup();
   }
 };
 
@@ -521,14 +483,14 @@ export const startBackgroundStreamingProcess = async (
       releaseSession = await lock.acquire();
     }
     await normalizedOptions.beforeStart?.();
-    const controller = createController(options.signal);
+    const { controller, cleanup } = createController(options.signal);
     activeControllers.add(controller);
     runId = registerRun(command, args, normalizedOptions, controller);
     backgroundStartReservations -= 1;
     await persistRunStart(runId, normalizedOptions.cwd);
     const subprocess = execa(command, [...args], {
       ...(normalizedOptions.cwd ? { cwd: normalizedOptions.cwd } : {}),
-      env: subprocessEnv(),
+      env: filteredClaudeEnv(),
       shell: false,
       stdin: "ignore",
       stdout: "pipe",
@@ -568,6 +530,7 @@ export const startBackgroundStreamingProcess = async (
         releaseSession?.();
         activeRuns.delete(startedRunId);
         activeControllers.delete(controller);
+        cleanup();
       });
 
     return {
@@ -687,3 +650,5 @@ export const shutdownSupervisor = async (): Promise<void> => {
   for (const controller of activeControllers) controller.abort();
   claudeQueue.clear();
 };
+
+export { validateWorkingDirectory } from "./working-directory.js";

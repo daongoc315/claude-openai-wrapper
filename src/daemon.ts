@@ -3,8 +3,8 @@ import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const PID_FILE = join(tmpdir(), "claude-openai-wrapper.pid");
-const PORT_FILE = join(tmpdir(), "claude-openai-wrapper.port");
+const PID_FILE = join(tmpdir(), "claude-openai.pid");
+const PORT_FILE = join(tmpdir(), "claude-openai.port");
 const SHUTDOWN_TIMEOUT_MS = 5_000;
 const CHECK_INTERVAL_MS = 100;
 
@@ -88,9 +88,9 @@ export const startDaemon = (options: DaemonStartOptions = {}): number => {
   if (!script) throw new Error("Unable to determine current executable script path");
 
   const env = { ...process.env };
-  if (options.host) env.CLAUDE_WRAPPER_HOST = options.host;
-  if (options.port) env.CLAUDE_WRAPPER_PORT = options.port;
-  if (options.apiKey) env.CLAUDE_WRAPPER_API_KEY = options.apiKey;
+  if (options.host) env.CLAUDE_OPENAI_HOST = options.host;
+  if (options.port) env.CLAUDE_OPENAI_PORT = options.port;
+  if (options.apiKey) env.CLAUDE_OPENAI_API_KEY = options.apiKey;
   if (options.debug) env.DEBUG = "1";
 
   const child = spawn(process.execPath, [script, "serve"], {
@@ -101,7 +101,7 @@ export const startDaemon = (options: DaemonStartOptions = {}): number => {
 
   if (!child.pid) throw new Error("Failed to start daemon process");
   writePid(child.pid);
-  writeDaemonPort(options.port || env.CLAUDE_WRAPPER_PORT || "8000");
+  writeDaemonPort(options.port || env.CLAUDE_OPENAI_PORT || "8000");
   child.unref();
   return child.pid;
 };

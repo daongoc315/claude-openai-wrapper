@@ -2,8 +2,9 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { randomUUID } from "node:crypto";
 import { appConfig } from "../config.js";
 import { shutdownSupervisor } from "../process-supervisor.js";
+import { traceEvent } from "../trace.js";
 import { CoreWrapper } from "../core/wrapper.js";
-import { modelListResponse, openaiError, type ChatCompletionRequest } from "../core/response-validator.js";
+import { modelListResponse, openaiError, type ChatCompletionRequest } from "../openai-adapter.js";
 
 const jsonHeaders = { "content-type": "application/json; charset=utf-8" } as const;
 const MAX_REQUEST_ID_BYTES = 256;
@@ -158,12 +159,23 @@ export const startHttpServer = async (): Promise<void> => {
         durationMs: Date.now() - started,
         requestId,
       });
+      traceEvent(
+        "http.request",
+        {
+          method: req.method || "GET",
+          path: req.url || "/",
+          status: res.statusCode,
+          durationMs: Date.now() - started,
+          requestId,
+        },
+        "info",
+      );
     });
     void (async () => {
       if (applyCors(req, res)) return;
       const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
       if (req.method === "GET" && url.pathname === "/health") {
-        sendJson(res, 200, { ok: true, status: "healthy", service: "claude-openai-wrapper" });
+        sendJson(res, 200, { ok: true, status: "healthy", service: "claude-openai" });
         return;
       }
       if (req.method === "GET" && url.pathname === "/logs") {
@@ -213,9 +225,24 @@ export const startHttpServer = async (): Promise<void> => {
   await new Promise<void>((resolve) => {
     server.listen(appConfig.httpPort, appConfig.httpHost, resolve);
   });
-  console.log(`Claude OpenAI wrapper listening on http://${appConfig.httpHost}:${appConfig.httpPort}`);
+  console.log(`Claude OpenAI listening on http://${appConfig.httpHost}:${appConfig.httpPort}`);
   console.log("Endpoints: GET /health, GET /v1/models, POST /v1/chat/completions");
-  if (!appConfig.apiKey) console.warn("Warning: CLAUDE_WRAPPER_API_KEY is not set; local API is unauthenticated.");
+  if (!appConfig.apiKey) console.warn("Warning: CLAUDE_OPENAI_API_KEY is not set; local API is unauthenticated.");
+  traceEvent(
+    "server.start",
+    {
+      host: appConfig.httpHost,
+      port: appConfig.httpPort,
+      backend: appConfig.backend,
+      defaultModel: appConfig.defaultModel,
+      hasApiKey: Boolean(appConfig.apiKey),
+      allowedPermissionModes: appConfig.allowedPermissionModes,
+      allowedWorkingDirectoryPrefixes: appConfig.allowedWorkingDirectoryPrefixes,
+      maxConcurrentClaudeProcesses: appConfig.maxConcurrentClaudeProcesses,
+      maxQueueSize: appConfig.maxQueueSize,
+    },
+    "info",
+  );
 
   await new Promise<void>(() => {
     // Keep the foreground process alive until a shutdown signal is received.

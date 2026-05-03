@@ -1,230 +1,420 @@
-# claude-openai-wrapper
+# claude-openai
 
-[![CI](https://github.com/daongoc315/claude-openai-wrapper/actions/workflows/ci.yml/badge.svg)](https://github.com/daongoc315/claude-openai-wrapper/actions/workflows/ci.yml)
-[![npm version](https://img.shields.io/npm/v/claude-openai-wrapper.svg)](https://www.npmjs.com/package/claude-openai-wrapper)
+[![CI](https://github.com/daongoc315/claude-openai/actions/workflows/ci.yml/badge.svg)](https://github.com/daongoc315/claude-openai/actions/workflows/ci.yml)
+[![npm version](https://img.shields.io/npm/v/claude-openai.svg)](https://www.npmjs.com/package/claude-openai)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 
-Alpha-stage local OpenAI-compatible HTTP/SSE wrapper around Claude Code. The default backend uses `@anthropic-ai/claude-agent-sdk`; the older direct CLI backend is available as a fallback.
+Local OpenAI-compatible HTTP/SSE server for Claude Code.
 
-Architecture mirrors `claude-wrapper` layering: API routes → core wrapper → Claude client → Agent SDK backend or supervised Claude CLI fallback.
+`claude-openai` lets OpenAI Chat Completions clients talk to Claude Code through a small local server. It is built for local developer workflows such as OpenCode, editor agents, scripts, and tools that expect `/v1/chat/completions`.
 
-## Purpose
+> Alpha software. Keep it local unless you add your own hardening, auth, and network controls.
 
-`claude-openai-wrapper` lets local tools that speak the OpenAI Chat Completions API use Claude Code through a small local server.
+## Features
 
-It exposes OpenAI-style endpoints while keeping Claude execution on your machine.
+- OpenAI-style endpoints:
+  - `GET /health`
+  - `GET /v1/models`
+  - `POST /v1/chat/completions`
+- Non-streaming and streaming SSE responses.
+- Default backend: `@anthropic-ai/claude-agent-sdk`.
+- CLI fallback backend for older/local workflows.
+- OpenAI `tools` support through a Claude Agent SDK adapter.
+- Flat CLI flags for normal setup; `CLAUDE_OPENAI_*` env vars for automation.
+- Structured NDJSON operation logs enabled by default at `debug` level so you can see HTTP summaries plus request/response payloads during local operation.
 
-## Local / personal use policy note
+## Architecture
 
-This wrapper is intended for **local/personal use** in trusted environments.
+```mermaid
+flowchart LR
+  Client[OpenAI-compatible client\nOpenCode / editor / script] --> HTTP[claude-openai HTTP server\n/v1/chat/completions]
+  HTTP --> Adapter[OpenAI request adapter\nmessages + options + tools]
+  Adapter --> Core[Core orchestration\nlogging + response shaping]
+  Core --> SDK[Claude Agent SDK backend]
+  Core --> CLI[Claude CLI fallback]
+  SDK --> Claude[Claude Code]
+  CLI --> Claude
+  SDK --> ToolAdapter[OpenAI tool adapter\nOpenAI tools -> SDK MCP tools]
+  ToolAdapter --> ToolCalls[OpenAI tool_calls response]
+  Core --> Logs[NDJSON operation logs\ninfo / debug / trace]
+```
 
-- Bind to loopback (`127.0.0.1`) unless you fully trust your network.
-- Set an API key when sharing a machine or network.
-- Do not expose this server publicly without additional hardening and access controls.
-- When tools are enabled, Claude Code can read/write files with the OS permissions of the wrapper process.
-- For production/commercial use, prefer official Anthropic API/cloud authentication paths and review Anthropic's Claude Code/Agent SDK terms.
+The design keeps each boundary explicit:
 
-## Prerequisites
+1. The HTTP layer speaks OpenAI-compatible JSON/SSE.
+2. The adapter converts OpenAI requests into Claude execution args.
+3. The SDK client runs Claude Code and returns text, usage, and tool calls.
+4. The tool adapter is schema-driven: OpenAI tool schemas become Claude SDK MCP tools, and SDK `tool_use` events are converted back to OpenAI `tool_calls`.
+5. Logging is operational by default: HTTP visibility first, deeper payload/protocol logs by level.
+
+Tool validation is not handled with string scraping. Tool arguments are validated against the request's JSON schema shape before an SDK `tool_use` is returned as an OpenAI `tool_calls` response.
+
+## Requirements
 
 - Node.js `>=20`
-- [Bun](https://bun.sh/) (for development, test, build)
-- Claude Code CLI installed and authenticated:
+- Claude Code installed and authenticated:
 
 ```bash
 npm install -g @anthropic-ai/claude-code
 claude --version
 ```
 
+For development, install [Bun](https://bun.sh/).
+
 ## Install
 
-Global install:
-
 ```bash
-npm install -g claude-openai-wrapper
+npm install -g claude-openai
 ```
 
-Run without global install:
+Or run without installing:
 
 ```bash
-npx -y claude-openai-wrapper
+npx -y claude-openai --port 8000
 ```
 
-## Run
+## Quick start
 
-Foreground server with logs in the current terminal:
+Start the local server:
 
 ```bash
-claude-openai-wrapper
+claude-openai --port 8000 --api-key dev-local-key
 ```
 
-By default it starts at `http://127.0.0.1:8000`.
-
-Debug mode:
+Call it like OpenAI:
 
 ```bash
-claude-openai-wrapper --debug --port 8000 --api-key dev-local-key
+curl http://127.0.0.1:8000/v1/chat/completions \
+  -H 'content-type: application/json' \
+  -H 'authorization: Bearer dev-local-key' \
+  -d '{
+    "model": "claude-sonnet",
+    "messages": [{ "role": "user", "content": "Say hello in one sentence." }]
+  }'
 ```
 
-Background daemon:
+Streaming:
 
 ```bash
-claude-openai-wrapper --background
+curl -N http://127.0.0.1:8000/v1/chat/completions \
+  -H 'content-type: application/json' \
+  -H 'authorization: Bearer dev-local-key' \
+  -d '{
+    "model": "claude-sonnet",
+    "stream": true,
+    "messages": [{ "role": "user", "content": "Count to three." }]
+  }'
 ```
 
-Daemon management:
+## CLI usage
 
 ```bash
-claude-openai-wrapper status
-claude-openai-wrapper stop
+claude-openai [options]
+claude-openai --background [options]
+claude-openai status
+claude-openai stop
+claude-openai runs
+claude-openai tail <runId>
+claude-openai cancel <runId>
 ```
 
-## Configuration (Environment Variables)
+Common flat flags:
 
-Core wrapper variables:
+```bash
+claude-openai \
+  --host 127.0.0.1 \
+  --port 8000 \
+  --api-key dev-local-key \
+  --backend sdk \
+  --default-model sonnet
+```
 
-| Variable | Default | Description |
-|---|---|---|
-| `CLAUDE_WRAPPER_HOST` | `127.0.0.1` | Host/interface to bind the local HTTP server |
-| `CLAUDE_WRAPPER_PORT` | `8000` | Local HTTP server port |
-| `CLAUDE_WRAPPER_API_KEY` | unset | Optional bearer token required by API endpoints |
-| `CLAUDE_WRAPPER_BACKEND` | `sdk` | Backend to use: `sdk` for Claude Agent SDK, `cli` for direct Claude CLI fallback |
-| `CLAUDE_WRAPPER_ALLOWED_WORKING_DIR_PREFIXES` | current directory | Comma-separated path prefixes allowed for `claude.workingDirectory` and `claude.addDirs` |
-| `CLAUDE_WRAPPER_ALLOWED_PERMISSION_MODES` | `acceptEdits,auto,default,plan` | Allowed permission modes for CLI fallback validation |
-| `CLAUDE_DEFAULT_MODEL` | `sonnet` | Default Claude model/alias for `model: claude` and OpenAI aliases |
-| `CLAUDE_MODELS_OVERRIDE` | built-in list | Comma-separated model IDs returned by `/v1/models` |
-| `CLAUDE_WRAPPER_MAX_REQUEST_BYTES` | `10485760` | Max request body size |
-| `CLAUDE_WRAPPER_OUTPUT_DIR` | `~/.claude-openai-wrapper/output` | Captured CLI fallback output directory |
-| `CORS_ORIGINS` | `*` | Comma-separated allowed CORS origins |
-| `CLAUDE_COMMAND` | `claude` | Claude CLI command/binary used by CLI fallback |
+Debug/log flags:
+
+```bash
+claude-openai \
+  --debug \
+  --log true \
+  --log-level debug \
+  --log-file claude-openai.log.ndjson
+```
+
+`--trace` is kept as a protocol-debug alias:
+
+```bash
+claude-openai \
+  --trace true \
+  --trace-file claude-openai.trace.ndjson
+```
+
+Advanced flat flags:
+
+```bash
+claude-openai \
+  --claude-command claude \
+  --allowed-working-directory-prefixes /Users/me/project,/tmp \
+  --allowed-permission-modes acceptEdits,auto,default,plan \
+  --max-concurrency 4 \
+  --max-queue-size 100 \
+  --process-timeout-ms 300000 \
+  --max-request-bytes 10485760
+```
+
+Every CLI flag is translated to process config before the server starts, so you usually do not need to export env vars manually.
+
+## Docker
+
+The repository includes a `Dockerfile` and `docker-compose.yml` for running the OpenAI-compatible server in a local container.
+
+Build and run with Docker Compose:
+
+```bash
+CLAUDE_OPENAI_API_KEY=dev-local-key \
+CLAUDE_WORKSPACE=/path/to/your/project \
+docker compose up --build
+```
+
+The compose file binds the service to loopback only:
+
+```text
+http://127.0.0.1:8000/v1
+```
+
+Use it from OpenAI-compatible clients with:
+
+```text
+Base URL: http://127.0.0.1:8000/v1
+API key:  dev-local-key
+Model:    claude-sonnet
+```
+
+Mounted paths:
+
+- `${CLAUDE_WORKSPACE:-.}` → `/workspace`, used as the allowed working-directory prefix.
+- `${HOME}/.claude` → `/home/node/.claude`, for Claude Code auth/config.
+- `${HOME}/.config/claude` → `/home/node/.config/claude`, for alternate Claude config storage.
+
+Example request:
+
+```bash
+curl http://127.0.0.1:8000/v1/chat/completions \
+  -H 'content-type: application/json' \
+  -H 'authorization: Bearer dev-local-key' \
+  -d '{
+    "model": "claude-sonnet",
+    "messages": [{ "role": "user", "content": "Say hello from Docker." }],
+    "claude": { "workingDirectory": "/workspace" }
+  }'
+```
 
 Notes:
 
-- `CLAUDE_WRAPPER_CLAUDE_COMMAND` is also supported.
+- Keep the container bound to `127.0.0.1` unless you add proper network/auth hardening.
+- If your Claude Code login is stored in the OS keychain instead of files, the mounted config directories may not be enough; log in inside the container or use an API/cloud auth path.
+- The image installs `@anthropic-ai/claude-code` globally and runs the built server with Node.
+
+## Environment variables
+
+Env vars are useful for Docker, systemd, launch agents, or hosted local daemons.
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `CLAUDE_OPENAI_HOST` | `127.0.0.1` | Bind host |
+| `CLAUDE_OPENAI_PORT` / `PORT` | `8000` | HTTP port |
+| `CLAUDE_OPENAI_API_KEY` / `API_KEY` | unset | Optional bearer token |
+| `CLAUDE_OPENAI_BACKEND` | `sdk` | `sdk` or `cli` |
+| `CLAUDE_OPENAI_CLAUDE_COMMAND` / `CLAUDE_COMMAND` | `claude` | Claude CLI command/path |
+| `CLAUDE_OPENAI_DEFAULT_MODEL` / `CLAUDE_DEFAULT_MODEL` | `sonnet` | Default Claude model alias |
+| `CLAUDE_MODELS_OVERRIDE` | built-in aliases | Comma-separated model list for `/v1/models` |
+| `CLAUDE_OPENAI_ALLOWED_PERMISSION_MODES` | `acceptEdits,auto,default,plan` | Accepted SDK permission modes |
+| `CLAUDE_OPENAI_ALLOWED_WORKING_DIR_PREFIXES` | current dir | Allowed workspace prefixes |
+| `CLAUDE_OPENAI_MAX_CONCURRENCY` | `2` | Concurrent Claude executions |
+| `CLAUDE_OPENAI_MAX_QUEUE_SIZE` | `100` | Queue size limit |
+| `CLAUDE_OPENAI_PROCESS_TIMEOUT_MS` | `120000` | CLI fallback process timeout |
+| `CLAUDE_OPENAI_OUTPUT_DIR` | `~/.claude-openai/output` | Captured CLI fallback output |
+| `CLAUDE_OPENAI_LOG` | `true` | Set `false` to disable structured operation logs. Also accepts `0`, `no`, `off` |
+| `CLAUDE_OPENAI_LOG_LEVEL` | `debug` | `info`, `debug`, or `trace` |
+| `CLAUDE_OPENAI_LOG_FILE` | stdout | Optional log output path, e.g. `claude-openai.log.ndjson` |
+| `CLAUDE_OPENAI_TRACE` | unset | Protocol-debug alias; use `true` for trace-style logs |
+| `CLAUDE_OPENAI_TRACE_FILE` | unset | Legacy trace output path; overridden by `CLAUDE_OPENAI_LOG_FILE` |
+| `CLAUDE_OPENAI_DEBUG` / `DEBUG` | unset | Extra stderr diagnostics |
+
+## OpenAI client configuration
+
+Point any OpenAI-compatible client at the local base URL:
+
+```text
+Base URL: http://127.0.0.1:8000/v1
+API key:  dev-local-key
+Model:    claude-sonnet
+```
+
+Example JavaScript client:
+
+```ts
+import OpenAI from "openai";
+
+const client = new OpenAI({
+  baseURL: "http://127.0.0.1:8000/v1",
+  apiKey: "dev-local-key",
+});
+
+const result = await client.chat.completions.create({
+  model: "claude-sonnet",
+  messages: [{ role: "user", content: "Summarize this project." }],
+});
+
+console.log(result.choices[0]?.message?.content);
+```
+
+## Tool calling
+
+`claude-openai` accepts OpenAI-style `tools` on chat completion requests. In SDK mode, tools are adapted into Claude Agent SDK MCP tools, then captured back as OpenAI `tool_calls`.
 
 Example:
-
-```bash
-export CLAUDE_WRAPPER_HOST=127.0.0.1
-export CLAUDE_WRAPPER_PORT=8000
-export CLAUDE_WRAPPER_API_KEY=dev-local-key
-export CLAUDE_COMMAND=claude
-claude-openai-wrapper
-```
-
-## OpenCode configuration example
-
-Point OpenCode (or another OpenAI-compatible client) at this wrapper:
-
-```json
-{
-  "provider": "openai-compatible",
-  "base_url": "http://127.0.0.1:8000/v1",
-  "api_key": "dev-local-key",
-  "model": "claude-sonnet"
-}
-```
-
-## API endpoints
-
-- `GET /health` — health check
-- `GET /logs` — recent in-memory request logs
-- `POST /logs/clear` — clear in-memory request logs
-- `GET /v1/models` — model list
-- `POST /v1/chat/completions` — chat completions (OpenAI-compatible)
-
-### Streaming support
-
-`POST /v1/chat/completions` supports `"stream": true` and returns Server-Sent Events (`text/event-stream`) with:
-
-- incremental `chat.completion.chunk` messages
-- terminal `data: [DONE]`
-
-### Claude Code tools
-
-Tools are disabled by default for OpenAI-compatible chat behavior. Enable Agent SDK tools when you need repo/file access:
 
 ```json
 {
   "model": "claude-sonnet",
-  "stream": true,
-  "enable_tools": true,
-  "messages": [{"role": "user", "content": "Summarize this repository"}],
-  "claude": {
-    "workingDirectory": "/path/to/project",
-    "toolMode": "readonly"
-  }
+  "messages": [{ "role": "user", "content": "Look up order 123." }],
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "lookup_order",
+        "description": "Look up an order by id",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "id": { "type": "string" }
+          },
+          "required": ["id"]
+        }
+      }
+    }
+  ]
 }
 ```
 
-Tool modes:
+Notes:
 
-- default: tools disabled, single-turn chat
-- `readonly`: `Read`, `Glob`, `Grep`
-- `safe`: readonly + `Edit`, `Write`, with `Bash` denied
-- `all`: Claude Code preset tools; use only in trusted local workflows
+- Final tool-call validation is driven by the JSON schema shape from the request, including supported types, enums, arrays, objects, and nested `required` fields.
+- The adapter keeps the MCP capture schema permissive so partial SDK tool inputs can be observed, then validates strictly before returning OpenAI `tool_calls`.
+- Tool names must use OpenAI-compatible function naming: letters, numbers, `_`, or `-`, up to 64 characters.
+- Treat tool support as experimental until you have tested your specific client/tool flow.
 
-Server-side safety defaults:
+## Backends
 
-- `bypassPermissions` is rejected unless `CLAUDE_WRAPPER_ALLOW_BYPASS_PERMISSIONS=1`.
-- Explicit `claude.tools` is rejected unless `CLAUDE_WRAPPER_ALLOW_EXPLICIT_TOOLS=1`.
-- `claude.workingDirectory` and `claude.addDirs` must be under `CLAUDE_WRAPPER_ALLOWED_WORKING_DIR_PREFIXES`.
-
-## CLI commands
+### SDK backend, default
 
 ```bash
-claude-openai-wrapper               # start HTTP/SSE wrapper
-claude-openai-wrapper --background  # run in background
-claude-openai-wrapper status        # show background daemon status
-claude-openai-wrapper stop          # stop background daemon
-claude-openai-wrapper --version     # print version
-claude-openai-wrapper --help        # print usage
-claude-openai-wrapper runs          # list known Claude runs
-claude-openai-wrapper tail <runId>  # print captured output for a run
-claude-openai-wrapper cancel <runId> # cancel an active run
+claude-openai --backend sdk
 ```
 
-## Docker
+Uses `@anthropic-ai/claude-agent-sdk`. This is the recommended backend and the only backend with OpenAI tool adapter support.
 
-Build and run foreground server:
+### CLI fallback backend
 
 ```bash
-docker build -t claude-openai-wrapper .
-docker run --rm -p 127.0.0.1:8000:8000 \
-  -e CLAUDE_WRAPPER_API_KEY=dev-local-key \
-  -e CLAUDE_WRAPPER_ALLOWED_WORKING_DIR_PREFIXES=/workspace \
-  -e CLAUDE_CONFIG_DIR=/home/node/.claude \
-  -v "$PWD:/workspace:rw" \
-  -v "$HOME/.claude:/home/node/.claude:rw" \
-  -v "$HOME/.config/claude:/home/node/.config/claude:rw" \
-  claude-openai-wrapper
+claude-openai --backend cli
 ```
 
-Or with Compose:
+Uses a supervised `claude` CLI process. This is retained for compatibility and diagnostics.
+
+## Background mode
 
 ```bash
-docker compose up --build
+claude-openai --background --port 8000 --api-key dev-local-key
+claude-openai status
+claude-openai stop
 ```
 
-The image installs `@anthropic-ai/claude-code`, but chat completion still needs valid Claude Code auth/config.
+Daemon metadata uses temp files named:
 
-The compose file demonstrates mounting common Claude Code config locations:
+```text
+claude-openai.pid
+claude-openai.port
+```
 
-- `$HOME/.claude` → `/home/node/.claude`
-- `$HOME/.config/claude` → `/home/node/.config/claude`
-- your project/workspace → `/workspace`
+Run outputs are stored under:
 
-If your Claude Code subscription login is stored in the host OS keychain instead of these files, the container may not be able to reuse it. In that case, either run the wrapper directly on the host, login inside the container, or use an official API/cloud auth path. `/health` only confirms the wrapper is alive; it does not prove Claude auth works.
+```text
+~/.claude-openai/output
+```
+
+## Logging and debugging
+
+Structured operation logging is enabled by default. The default level is `debug`, which logs HTTP summaries plus request/response payloads, adapter args, and tool-call metadata. This is intentionally useful for local operation and debugging client/server mismatches.
+
+For background mode or long-running local use, write logs to a file:
+
+```bash
+claude-openai --log-file ./claude-openai.log.ndjson
+```
+
+Use `info` when you only want HTTP middleware summaries such as request method, path, status, duration, and request id:
+
+```bash
+claude-openai --log-level info --log-file ./claude-openai.log.ndjson
+```
+
+Use `debug` explicitly when you want the default request/response visibility:
+
+```bash
+claude-openai --log true --log-level debug --log-file ./claude-openai.log.ndjson
+```
+
+Use `trace` for raw/deep SDK protocol events:
+
+```bash
+claude-openai --log true --log-level trace --log-file ./claude-openai.trace.ndjson
+```
+
+The log includes events such as:
+
+- `server.start`
+- `http.request` (`info`)
+- `openai.request`
+- `openai.effective_request`
+- `adapter.claude_args`
+- `sdk.message`
+- `sdk.structured_tool_call`
+- `sdk.can_use_tool`
+- `openai.response`
+- `openai.stream_tool_calls`
+- `sdk.error`
+
+Logs are NDJSON and redact secret-like keys such as authorization headers, API keys, tokens, cookies, and passwords.
+
+## Security notes
+
+- Bind to `127.0.0.1` unless you intentionally expose the server.
+- Set `--api-key` when other local users or network clients may reach the port.
+- Do not expose this server directly to the public internet.
+- Claude Code runs with the OS permissions of this process.
+- Tool-capable requests can lead to filesystem and command execution depending on Claude Code permissions and configuration.
 
 ## Development
 
 ```bash
 bun install
-bun run dev
 bun run typecheck
-bun run test
+bun test
+bun run ci
+```
+
+Build:
+
+```bash
 bun run build
+```
+
+Dry-run package:
+
+```bash
+npm pack --dry-run
 ```
 
 ## License
 
-MIT — see [LICENSE](./LICENSE).
+MIT

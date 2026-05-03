@@ -5,10 +5,10 @@ services:
       # Bind to loopback by default. Do not expose this service publicly.
       - "127.0.0.1:8000:8000"
     environment:
-      CLAUDE_WRAPPER_HOST: 0.0.0.0
-      CLAUDE_WRAPPER_PORT: 8000
-      CLAUDE_WRAPPER_API_KEY: ${CLAUDE_WRAPPER_API_KEY:-dev-local-key}
-      CLAUDE_WRAPPER_ALLOWED_WORKING_DIR_PREFIXES: /workspace
+      CLAUDE_OPENAI_HOST: 0.0.0.0
+      CLAUDE_OPENAI_PORT: 8000
+      CLAUDE_OPENAI_API_KEY: ${CLAUDE_OPENAI_API_KEY:-dev-local-key}
+      CLAUDE_OPENAI_ALLOWED_WORKING_DIR_PREFIXES: /workspace
       CLAUDE_CONFIG_DIR: /home/node/.claude
       CLAUDE_COMMAND: claude
     volumes:

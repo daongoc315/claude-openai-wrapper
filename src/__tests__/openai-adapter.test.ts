@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { chatCompletionResponse, messagesToPrompt, streamChunk, toClaudeArgs } from "../openai-adapter.js";
+import { __test__, chatCompletionResponse, messagesToPrompt, streamChunk, toClaudeArgs } from "../openai-adapter.js";
 
 test("messagesToPrompt maps roles and content variants", () => {
   const prompt = messagesToPrompt([
@@ -10,11 +10,11 @@ test("messagesToPrompt maps roles and content variants", () => {
     { role: "developer", content: "Keep answers concise" },
   ]);
 
-  expect(prompt).toContain("System: Follow project rules");
-  expect(prompt).toContain("User: Hello");
-  expect(prompt).toContain("Assistant: Hi\n there");
-  expect(prompt).toContain("Tool (search): Found docs");
-  expect(prompt).toContain("System: Keep answers concise");
+  expect(prompt).toContain('<message role="system">\nFollow project rules\n</message>');
+  expect(prompt).toContain('<message role="user">\nHello\n</message>');
+  expect(prompt).toContain('<message role="assistant">\nHi\n there\n</message>');
+  expect(prompt).toContain('<message role="tool" name="search">\nFound docs\n</message>');
+  expect(prompt).toContain('<message role="developer">\nKeep answers concise\n</message>');
 });
 
 test("toClaudeArgs validates messages", () => {
@@ -62,6 +62,36 @@ test("toClaudeArgs disables tools by default and enables readonly tools when req
   expect(enabled.enableTools).toBe(true);
   expect(enabled.tools).toEqual(["Read", "Glob", "Grep"]);
   expect(enabled.allowedTools).toEqual(["Read", "Glob", "Grep"]);
+});
+
+test("toClaudeArgs resolves OpenAI tool_choice explicitly", () => {
+  const tools = [
+    { type: "function", function: { name: "lookup", parameters: { type: "object" } } },
+    { type: "function", function: { name: "search", parameters: { type: "object" } } },
+  ];
+  const disabled = toClaudeArgs({ messages: [{ role: "user", content: "hi" }], tools, tool_choice: "none" });
+  const forced = toClaudeArgs({ messages: [{ role: "user", content: "hi" }], tools, tool_choice: { type: "function", function: { name: "lookup" } } });
+  const missingForced = toClaudeArgs({ messages: [{ role: "user", content: "hi" }], tools, tool_choice: { type: "function", function: { name: "does_not_exist" } } });
+  const invalid = toClaudeArgs({ messages: [{ role: "user", content: "hi" }], tool_choice: { type: "function", function: { name: "lookup" } } });
+
+  if ("error" in disabled || "error" in forced) throw new Error("Expected valid Claude args");
+
+  expect(disabled.enableTools).toBe(false);
+  expect(disabled.openAITools).toBeUndefined();
+  expect(forced.enableTools).toBe(true);
+  expect(forced.openAITools).toEqual([tools[0]]);
+  expect("error" in missingForced).toBeTrue();
+  if ("error" in missingForced) {
+    expect(missingForced.error.status).toBe(400);
+    expect(missingForced.error.body.error.message).toContain("does_not_exist");
+  }
+  expect("error" in invalid).toBeTrue();
+});
+
+test("resolveToolStrategy separates tool policy from Claude args projection", () => {
+  expect(__test__.resolveToolStrategy({ messages: [{ role: "user", content: "hi" }] })).toEqual({ kind: "disabled" });
+  expect(__test__.resolveToolStrategy({ messages: [{ role: "user", content: "hi" }], enable_tools: true })).toEqual({ kind: "claudeMode", mode: "readonly" });
+  expect(__test__.toolStrategyToClaudeArgs({ kind: "claudeMode", mode: "safe" })).toMatchObject({ enableTools: true, toolMode: "safe", allowedTools: ["Read", "Glob", "Grep", "Edit", "Write"] });
 });
 
 test("streamChunk and chatCompletionResponse emit OpenAI-compatible shapes", () => {

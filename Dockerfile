@@ -10,8 +10,8 @@ RUN bun run build
 FROM node:22-slim AS runtime
 WORKDIR /app
 ENV NODE_ENV=production \
-    CLAUDE_WRAPPER_HOST=0.0.0.0 \
-    CLAUDE_WRAPPER_PORT=8000 \
+    CLAUDE_OPENAI_HOST=0.0.0.0 \
+    CLAUDE_OPENAI_PORT=8000 \
     HOME=/home/node \
     CLAUDE_CONFIG_DIR=/home/node/.claude
 

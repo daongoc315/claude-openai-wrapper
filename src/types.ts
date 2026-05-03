@@ -1,5 +1,5 @@
-export const SERVER_NAME = "claude-openai-wrapper";
-export const SERVER_VERSION = "0.1.1";
+export const SERVER_NAME = "claude-openai";
+export const SERVER_VERSION = "0.1.11";
 
 export interface ClaudeJsonOutput {
   readonly type?: string;
@@ -34,6 +34,15 @@ export interface ClaudeStreamCallbacks {
   readonly onText?: (text: string, event: ClaudeStreamEvent, index: number) => void | Promise<void>;
 }
 
+export interface OpenAIToolCallResult {
+  readonly id: string;
+  readonly type: "function";
+  readonly function: {
+    readonly name: string;
+    readonly arguments: string;
+  };
+}
+
 export interface ClaudeRunOptions {
   readonly signal?: AbortSignal | undefined;
 }
@@ -47,6 +56,7 @@ export interface ClaudeRunResult {
   readonly wrapperSessionId?: string;
   readonly claudeSessionId?: string;
   readonly usage?: unknown;
+  readonly toolCalls?: readonly OpenAIToolCallResult[];
 }
 
 export interface SessionInfo {

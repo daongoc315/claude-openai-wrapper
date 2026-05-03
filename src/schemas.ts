@@ -19,6 +19,7 @@ export const ClaudeArgsSchema = Schema.Struct({
   allowedTools: optionalStringArray,
   disallowedTools: optionalStringArray,
   tools: optionalStringArray,
+  openAITools: Schema.optional(Schema.Array(Schema.Unknown)),
   enableTools: Schema.optional(Schema.Boolean),
   toolMode: Schema.optional(ToolModeSchema),
   addDirs: optionalStringArray,

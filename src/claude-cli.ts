@@ -47,7 +47,7 @@ const validatePromptSize = (prompt: string): Effect.Effect<void, ClaudeCliError>
     : Effect.fail(
         new ClaudeCliError({
           code: "CLAUDE_SPAWN_ERROR",
-          message: `Prompt exceeds CLAUDE_WRAPPER_MAX_PROMPT_BYTES (${appConfig.maxPromptBytes})`,
+          message: `Prompt exceeds CLAUDE_OPENAI_MAX_PROMPT_BYTES (${appConfig.maxPromptBytes})`,
         }),
       );
 

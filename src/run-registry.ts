@@ -25,8 +25,8 @@ export interface RegistryRun {
   readonly status: "running" | "completed" | "failed" | "canceled";
 }
 
-const registryDir = join(homedir(), ".claude-openai-wrapper", "runs");
-const outputDir = process.env.CLAUDE_WRAPPER_OUTPUT_DIR || join(homedir(), ".claude-openai-wrapper", "output");
+const registryDir = join(homedir(), ".claude-openai", "runs");
+const outputDir = process.env.CLAUDE_OPENAI_OUTPUT_DIR || join(homedir(), ".claude-openai", "output");
 
 const fileFor = (id: string): string => {
   assertValidRunId(id);

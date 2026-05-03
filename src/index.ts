@@ -8,41 +8,94 @@ type CliOptions = {
   apiKey?: string;
   background: boolean;
   debug: boolean;
+  env: Record<string, string>;
+};
+
+const VALUE_FLAGS: Record<string, string> = {
+  "--backend": "CLAUDE_OPENAI_BACKEND",
+  "--host": "CLAUDE_OPENAI_HOST",
+  "--port": "CLAUDE_OPENAI_PORT",
+  "--api-key": "CLAUDE_OPENAI_API_KEY",
+  "--claude-command": "CLAUDE_OPENAI_CLAUDE_COMMAND",
+  "--default-model": "CLAUDE_OPENAI_DEFAULT_MODEL",
+  "--models": "CLAUDE_MODELS_OVERRIDE",
+  "--cors-origins": "CORS_ORIGINS",
+  "--allowed-permission-modes": "CLAUDE_OPENAI_ALLOWED_PERMISSION_MODES",
+  "--allowed-working-directory-prefixes": "CLAUDE_OPENAI_ALLOWED_WORKING_DIR_PREFIXES",
+  "--max-request-bytes": "CLAUDE_OPENAI_MAX_REQUEST_BYTES",
+  "--max-concurrency": "CLAUDE_OPENAI_MAX_CONCURRENCY",
+  "--queue-interval-cap": "CLAUDE_OPENAI_QUEUE_INTERVAL_CAP",
+  "--queue-interval-ms": "CLAUDE_OPENAI_QUEUE_INTERVAL_MS",
+  "--queue-task-timeout-ms": "CLAUDE_OPENAI_QUEUE_TASK_TIMEOUT_MS",
+  "--max-queue-size": "CLAUDE_OPENAI_MAX_QUEUE_SIZE",
+  "--process-timeout-ms": "CLAUDE_OPENAI_PROCESS_TIMEOUT_MS",
+  "--kill-grace-period-ms": "CLAUDE_OPENAI_KILL_GRACE_PERIOD_MS",
+  "--max-prompt-bytes": "CLAUDE_OPENAI_MAX_PROMPT_BYTES",
+  "--max-output-bytes": "CLAUDE_OPENAI_MAX_OUTPUT_BYTES",
+  "--max-returned-error-bytes": "CLAUDE_OPENAI_MAX_RETURNED_ERROR_BYTES",
+  "--session-ttl-ms": "CLAUDE_OPENAI_SESSION_TTL_MS",
+  "--session-lock-timeout-ms": "CLAUDE_OPENAI_SESSION_LOCK_TIMEOUT_MS",
+  "--shutdown-grace-ms": "CLAUDE_OPENAI_SHUTDOWN_GRACE_MS",
+  "--output-dir": "CLAUDE_OPENAI_OUTPUT_DIR",
+  "--log-level": "CLAUDE_OPENAI_LOG_LEVEL",
+  "--log-file": "CLAUDE_OPENAI_LOG_FILE",
+  "--trace-file": "CLAUDE_OPENAI_TRACE_FILE",
+  "--claude-config-dir": "CLAUDE_OPENAI_CLAUDE_CONFIG_DIR",
+  "--agent-sdk-client-app": "CLAUDE_OPENAI_AGENT_SDK_CLIENT_APP",
+};
+
+const BOOLEAN_FLAGS: Record<string, string> = {
+  "--log": "CLAUDE_OPENAI_LOG",
+  "--trace": "CLAUDE_OPENAI_TRACE",
+  "--allow-bypass-permissions": "CLAUDE_OPENAI_ALLOW_BYPASS_PERMISSIONS",
+  "--allow-explicit-tools": "CLAUDE_OPENAI_ALLOW_EXPLICIT_TOOLS",
 };
 
 const parseArgs = (argv: readonly string[]): CliOptions => {
-  const options: CliOptions = { background: false, debug: false };
+  const options: CliOptions = { background: false, debug: false, env: {} };
   for (let i = 0; i < argv.length; i += 1) {
-    const arg = argv[i];
+    const raw = argv[i];
+    if (!raw) continue;
+    const [arg, inlineValue] = raw.includes("=") ? (raw.split(/=(.*)/s, 2) as [string, string]) : [raw, undefined];
     if (!arg) continue;
     if (!arg.startsWith("-") && !options.command) {
       options.command = arg;
       continue;
     }
     if (arg === "--background" || arg === "--bg" || arg === "background") options.background = true;
-    else if (arg === "--debug" || arg === "-d") options.debug = true;
+    else if (arg === "--debug" || arg === "-d") {
+      options.debug = true;
+      options.env.CLAUDE_OPENAI_DEBUG = "true";
+      options.env.CLAUDE_OPENAI_LOG_LEVEL = "debug";
+    }
     else if (arg === "--version" || arg === "-v") options.command = "version";
     else if (arg === "--help" || arg === "-h") options.command = "help";
     else if (arg === "--stop") options.command = "stop";
     else if (arg === "--status") options.command = "status";
-    else if (arg === "--port" || arg === "-p") {
-      const value = argv[++i];
-      if (value) options.port = value;
-    } else if (arg === "--host") {
-      const value = argv[++i];
-      if (value) options.host = value;
-    } else if (arg === "--api-key" || arg === "-k") {
-      const value = argv[++i];
-      if (value) options.apiKey = value;
+    else if (arg === "-p" || arg === "-k") {
+      const value = inlineValue ?? argv[++i];
+      if (!value) continue;
+      const envName = arg === "-p" ? "CLAUDE_OPENAI_PORT" : "CLAUDE_OPENAI_API_KEY";
+      options.env[envName] = value;
+      if (arg === "-p") options.port = value;
+      else options.apiKey = value;
+    } else if (VALUE_FLAGS[arg]) {
+      const value = inlineValue ?? argv[++i];
+      if (!value) continue;
+      options.env[VALUE_FLAGS[arg]] = value;
+      if (arg === "--port") options.port = value;
+      if (arg === "--host") options.host = value;
+      if (arg === "--api-key") options.apiKey = value;
+    } else if (BOOLEAN_FLAGS[arg]) {
+      options.env[BOOLEAN_FLAGS[arg]] = inlineValue ?? "true";
+      if (arg === "--trace") options.env.CLAUDE_OPENAI_LOG_LEVEL = "trace";
     }
   }
   return options;
 };
 
-const applyServerEnv = (options: Pick<CliOptions, "apiKey" | "host" | "port">): void => {
-  if (options.host) process.env.CLAUDE_WRAPPER_HOST = options.host;
-  if (options.port) process.env.CLAUDE_WRAPPER_PORT = options.port;
-  if (options.apiKey) process.env.CLAUDE_WRAPPER_API_KEY = options.apiKey;
+const applyServerEnv = (options: CliOptions): void => {
+  Object.assign(process.env, options.env);
 };
 
 const startForeground = async (options: CliOptions): Promise<void> => {
@@ -52,11 +105,12 @@ const startForeground = async (options: CliOptions): Promise<void> => {
 };
 
 const printHelp = (): void => {
-  console.log(`${SERVER_NAME} ${SERVER_VERSION}\n\nUsage:\n  claude-openai-wrapper [--port 8000] [--api-key key]       Start foreground server\n  claude-openai-wrapper --background                       Start background daemon\n  claude-openai-wrapper --debug                            Start foreground server with debug intent\n  claude-openai-wrapper status | --status                  Show daemon status\n  claude-openai-wrapper stop | --stop                      Stop daemon\n  claude-openai-wrapper runs                               List known Claude runs\n  claude-openai-wrapper tail <runId>                       Print captured run output\n  claude-openai-wrapper cancel <runId>                     Cancel an active Claude run\n\nEnvironment:\n  CLAUDE_WRAPPER_HOST=127.0.0.1\n  CLAUDE_WRAPPER_PORT=8000\n  CLAUDE_WRAPPER_API_KEY=optional-local-token\n  CLAUDE_WRAPPER_BACKEND=sdk|cli\n  CLAUDE_COMMAND=claude`);
+  console.log(`${SERVER_NAME} ${SERVER_VERSION}\n\nUsage:\n  claude-openai [options]                          Start foreground server\n  claude-openai --background [options]             Start background daemon\n  claude-openai status | stop                      Manage background daemon\n  claude-openai runs | tail <runId> | cancel <runId>\n\nCommon options:\n  --host 127.0.0.1\n  --port 8000\n  --api-key dev-local-key\n  --backend sdk|cli\n  --default-model sonnet\n  --claude-command claude\n  --allowed-working-directory-prefixes /repo,/tmp\n  --max-concurrency 4\n  --process-timeout-ms 300000\n  --log true --log-level debug --log-file claude-openai.log.ndjson\n  --trace true --trace-file claude-openai.trace.ndjson\n  --debug\n\nEnvironment equivalents use CLAUDE_OPENAI_* names.`);
 };
 
 export const runCli = async (argv: readonly string[]): Promise<number> => {
   const options = parseArgs(argv);
+  applyServerEnv(options);
   const arg = options.command;
 
   if (arg === "version") {
@@ -130,7 +184,7 @@ export const runCli = async (argv: readonly string[]): Promise<number> => {
     const { startDaemon } = await import("./daemon.js");
     try {
       const pid = startDaemon(options);
-      const port = options.port || process.env.CLAUDE_WRAPPER_PORT || "8000";
+      const port = options.port || process.env.CLAUDE_OPENAI_PORT || "8000";
       console.log(`Started ${SERVER_NAME} daemon pid=${pid}`);
       console.log(`API: http://127.0.0.1:${port}/v1/chat/completions`);
       return 0;
