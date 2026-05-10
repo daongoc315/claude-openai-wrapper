@@ -105,7 +105,7 @@ const startForeground = async (options: CliOptions): Promise<void> => {
 };
 
 const printHelp = (): void => {
-  console.log(`${SERVER_NAME} ${SERVER_VERSION}\n\nUsage:\n  claude-openai [options]                          Start foreground server\n  claude-openai --background [options]             Start background daemon\n  claude-openai status | stop                      Manage background daemon\n  claude-openai runs | tail <runId> | cancel <runId>\n\nCommon options:\n  --host 127.0.0.1\n  --port 8000\n  --api-key dev-local-key\n  --backend sdk|cli\n  --default-model sonnet\n  --claude-command claude\n  --allowed-working-directory-prefixes /repo,/tmp\n  --max-concurrency 4\n  --process-timeout-ms 300000\n  --log true --log-level debug --log-file claude-openai.log.ndjson\n  --trace true --trace-file claude-openai.trace.ndjson\n  --debug\n\nEnvironment equivalents use CLAUDE_OPENAI_* names.`);
+  console.log(`${SERVER_NAME} ${SERVER_VERSION}\n\nUsage:\n  claude-openai start [options]                    Start as background daemon\n  claude-openai debug [options]                    Run foreground with debug logs\n  claude-openai stop                               Stop background daemon\n  claude-openai restart [options]                  Restart background daemon\n  claude-openai status                             Show daemon status + health\n  claude-openai logs                               Tail daemon log file\n  claude-openai [options]                          (default) Run foreground server\n  claude-openai runs | tail <runId> | cancel <runId>\n\nCommon options:\n  --host 127.0.0.1\n  --port 8000\n  --api-key dev-local-key\n  --backend sdk|cli\n  --default-model sonnet\n  --claude-command claude\n  --allowed-working-directory-prefixes /repo,/tmp\n  --max-concurrency 4\n  --process-timeout-ms 300000\n  --log true --log-level debug --log-file claude-openai.log.ndjson\n  --trace true --trace-file claude-openai.trace.ndjson\n  --debug\n\nEnvironment equivalents use CLAUDE_OPENAI_* names.`);
 };
 
 export const runCli = async (argv: readonly string[]): Promise<number> => {
@@ -128,11 +128,59 @@ export const runCli = async (argv: readonly string[]): Promise<number> => {
     return 0;
   }
 
+  if (arg === "start" || arg === undefined) {
+    const { startDaemon } = await import("./daemon.js");
+    try {
+      const pid = startDaemon(options);
+      const port = options.port || process.env.CLAUDE_OPENAI_PORT || "8765";
+      console.log(`Started ${SERVER_NAME} daemon pid=${pid}`);
+      console.log(`API: http://127.0.0.1:${port}/v1/chat/completions`);
+      console.log(`Logs: claude-openai logs`);
+      return 0;
+    } catch (error) {
+      console.error(error instanceof Error ? error.message : String(error));
+      return 1;
+    }
+  }
+
+  if (arg === "debug") {
+    process.env.CLAUDE_OPENAI_DEBUG = "true";
+    process.env.CLAUDE_OPENAI_LOG = "true";
+    process.env.CLAUDE_OPENAI_LOG_LEVEL = "debug";
+    await startForeground(options);
+    return 0;
+  }
+
   if (arg === "stop") {
     const { stopDaemon } = await import("./daemon.js");
     const stopped = await stopDaemon();
     console.log(stopped ? "Stopped daemon" : "No running daemon");
     return stopped ? 0 : 1;
+  }
+
+  if (arg === "restart") {
+    const { startDaemon, stopDaemon } = await import("./daemon.js");
+    await stopDaemon();
+    try {
+      const pid = startDaemon(options);
+      console.log(`Restarted ${SERVER_NAME} daemon pid=${pid}`);
+      return 0;
+    } catch (error) {
+      console.error(error instanceof Error ? error.message : String(error));
+      return 1;
+    }
+  }
+
+  if (arg === "logs") {
+    const { LOG_FILE } = await import("./daemon.js");
+    const { spawn } = await import("node:child_process");
+    const { existsSync } = await import("node:fs");
+    if (!existsSync(LOG_FILE)) {
+      console.error(`No log file found at ${LOG_FILE}`);
+      return 1;
+    }
+    const tail = spawn("tail", ["-f", LOG_FILE], { stdio: "inherit" });
+    return await new Promise((resolve) => tail.on("exit", (code) => resolve(code ?? 0)));
   }
 
   if (arg === "status") {
@@ -178,20 +226,6 @@ export const runCli = async (argv: readonly string[]): Promise<number> => {
     const canceled = await cancelRegistryRun(runId);
     console.log(canceled ? `Canceled ${runId}` : `Could not cancel ${runId}`);
     return canceled ? 0 : 1;
-  }
-
-  if (options.background) {
-    const { startDaemon } = await import("./daemon.js");
-    try {
-      const pid = startDaemon(options);
-      const port = options.port || process.env.CLAUDE_OPENAI_PORT || "8000";
-      console.log(`Started ${SERVER_NAME} daemon pid=${pid}`);
-      console.log(`API: http://127.0.0.1:${port}/v1/chat/completions`);
-      return 0;
-    } catch (error) {
-      console.error(error instanceof Error ? error.message : String(error));
-      return 1;
-    }
   }
 
   await startForeground(options);

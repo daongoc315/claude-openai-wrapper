@@ -1,10 +1,11 @@
 import { spawn } from "node:child_process";
-import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, openSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const PID_FILE = join(tmpdir(), "claude-openai.pid");
 const PORT_FILE = join(tmpdir(), "claude-openai.port");
+export const LOG_FILE = join(tmpdir(), "claude-openai.log");
 const SHUTDOWN_TIMEOUT_MS = 5_000;
 const CHECK_INTERVAL_MS = 100;
 
@@ -93,15 +94,16 @@ export const startDaemon = (options: DaemonStartOptions = {}): number => {
   if (options.apiKey) env.CLAUDE_OPENAI_API_KEY = options.apiKey;
   if (options.debug) env.DEBUG = "1";
 
+  const logFd = openSync(LOG_FILE, "a");
   const child = spawn(process.execPath, [script, "serve"], {
     detached: true,
-    stdio: "ignore",
+    stdio: ["ignore", logFd, logFd],
     env,
   });
 
   if (!child.pid) throw new Error("Failed to start daemon process");
   writePid(child.pid);
-  writeDaemonPort(options.port || env.CLAUDE_OPENAI_PORT || "8000");
+  writeDaemonPort(options.port || env.CLAUDE_OPENAI_PORT || "8765");
   child.unref();
   return child.pid;
 };

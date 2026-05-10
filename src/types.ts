@@ -1,5 +1,5 @@
 export const SERVER_NAME = "claude-openai";
-export const SERVER_VERSION = "0.2.0";
+export const SERVER_VERSION = "0.2.1";
 
 export interface ClaudeJsonOutput {
   readonly type?: string;

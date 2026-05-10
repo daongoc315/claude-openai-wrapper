@@ -1,6 +1,6 @@
 {
   "name": "claude-openai",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Local OpenAI-compatible HTTP/SSE server for Claude Code Agent SDK and CLI fallback.",
   "type": "module",
   "main": "dist/index.js",

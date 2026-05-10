@@ -63,7 +63,7 @@ export const appConfig: AppConfig = {
   claudeCommand: stringFromEnv(["CLAUDE_OPENAI_CLAUDE_COMMAND", "CLAUDE_COMMAND"], "claude"),
   backend: stringFromEnv("CLAUDE_OPENAI_BACKEND", "sdk") === "cli" ? "cli" : "sdk",
   httpHost: stringFromEnv("CLAUDE_OPENAI_HOST", "127.0.0.1"),
-  httpPort: numberFromEnv(["CLAUDE_OPENAI_PORT", "PORT"], 8000),
+  httpPort: numberFromEnv(["CLAUDE_OPENAI_PORT", "PORT"], 8765),
   apiKey: firstEnv(["CLAUDE_OPENAI_API_KEY", "API_KEY"]),
   allowedPermissionModes: splitCsvEnv("CLAUDE_OPENAI_ALLOWED_PERMISSION_MODES", ["acceptEdits", "auto", "default", "plan"]),
   allowedWorkingDirectoryPrefixes: splitCsvEnv("CLAUDE_OPENAI_ALLOWED_WORKING_DIR_PREFIXES", [process.cwd()]),
