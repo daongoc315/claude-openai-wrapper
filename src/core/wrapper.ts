@@ -9,23 +9,54 @@ type ChatCompletionBody = ReturnType<typeof chatCompletionResponse> | ReturnType
 
 const streamToolCallsDelta = (toolCalls: readonly OpenAIToolCallResult[]) => toolCalls.map((toolCall, index) => ({ index, ...toolCall }));
 
-const agentSdkFallbackRequest = (request: ChatCompletionRequest): ChatCompletionRequest => {
+const agentSdkFallbackRequest = (request: ChatCompletionRequest): ChatCompletionRequest => ({
+  ...request,
+  enable_tools: true,
+  claude: {
+    ...request.claude,
+    enableTools: true,
+    toolMode: request.claude?.toolMode || "readonly",
+  },
+});
+
+const requestSummary = (request: ChatCompletionRequest): Record<string, unknown> => ({
+  model: request.model,
+  stream: request.stream,
+  messageCount: request.messages?.length ?? 0,
+  toolCount: request.tools?.length ?? 0,
+  hasSessionId: Boolean(request.session_id || request.claude?.sessionId),
+  hasClaudeOptions: Boolean(request.claude && Object.keys(request.claude).length),
+  enableTools: request.enable_tools || request.claude?.enableTools,
+  toolChoice: request.tool_choice === undefined ? undefined : typeof request.tool_choice === "string" ? request.tool_choice : "object",
+});
+
+const claudeArgsSummary = (value: unknown): unknown => {
+  if (!value || typeof value !== "object" || "error" in value) return value;
+  const args = value as {
+    prompt?: string;
+    sessionId?: string;
+    model?: string;
+    enableTools?: boolean;
+    tools?: readonly unknown[];
+    allowedTools?: readonly unknown[];
+    disallowedTools?: readonly unknown[];
+    openAITools?: readonly unknown[];
+    permissionMode?: string;
+    toolMode?: string;
+    workingDirectory?: string;
+  };
   return {
-    ...request,
-    enable_tools: true,
-    claude: {
-      ...request.claude,
-      enableTools: true,
-      toolMode: request.claude?.toolMode || "readonly",
-    },
-    messages: [
-      {
-        role: "developer",
-        content:
-          "This is an OpenAI-compatible server over Claude Code Agent SDK. When tools are provided, call them through the available OpenAI tool adapter. Never print internal protocol markup such as <delegation>, <function_calls>, or pseudo tool calls.",
-      },
-      ...(request.messages || []),
-    ],
+    model: args.model,
+    sessionId: args.sessionId,
+    promptChars: args.prompt?.length ?? 0,
+    enableTools: args.enableTools,
+    toolMode: args.toolMode,
+    permissionMode: args.permissionMode,
+    workingDirectory: args.workingDirectory,
+    toolsCount: args.tools?.length ?? 0,
+    allowedToolsCount: args.allowedTools?.length ?? 0,
+    disallowedToolsCount: args.disallowedTools?.length ?? 0,
+    openAIToolsCount: args.openAITools?.length ?? 0,
   };
 };
 
@@ -70,11 +101,14 @@ export class CoreWrapper {
     }
     const requestObj = validatedRequest;
     const effectiveRequest = hasOpenAITooling(requestObj) ? agentSdkFallbackRequest(requestObj) : requestObj;
-    traceEvent("openai.request", requestObj, "debug");
-    traceEvent("openai.effective_request", effectiveRequest, "debug");
+    traceEvent("openai.request_summary", requestSummary(requestObj), "debug");
+    traceEvent("openai.effective_request_summary", requestSummary(effectiveRequest), "debug");
+    traceEvent("openai.request", requestObj, "trace");
+    traceEvent("openai.effective_request", effectiveRequest, "trace");
 
     const claudeArgs = toClaudeArgs(effectiveRequest);
-    traceEvent("adapter.claude_args", claudeArgs, "debug");
+    traceEvent("adapter.claude_args_summary", claudeArgsSummary(claudeArgs), "debug");
+    traceEvent("adapter.claude_args", claudeArgs, "trace");
     if ("error" in claudeArgs) {
       return { ok: false, status: claudeArgs.error.status, body: claudeArgs.error.body };
     }
@@ -107,11 +141,14 @@ export class CoreWrapper {
     }
     const requestObj = validatedRequest;
     const effectiveRequest = hasOpenAITooling(requestObj) ? agentSdkFallbackRequest(requestObj) : requestObj;
-    traceEvent("openai.stream_request", requestObj, "debug");
-    traceEvent("openai.stream_effective_request", effectiveRequest, "debug");
+    traceEvent("openai.stream_request_summary", requestSummary(requestObj), "debug");
+    traceEvent("openai.stream_effective_request_summary", requestSummary(effectiveRequest), "debug");
+    traceEvent("openai.stream_request", requestObj, "trace");
+    traceEvent("openai.stream_effective_request", effectiveRequest, "trace");
 
     const claudeArgs = toClaudeArgs(effectiveRequest);
-    traceEvent("adapter.stream_claude_args", claudeArgs, "debug");
+    traceEvent("adapter.stream_claude_args_summary", claudeArgsSummary(claudeArgs), "debug");
+    traceEvent("adapter.stream_claude_args", claudeArgs, "trace");
     if ("error" in claudeArgs) {
       return { ok: false, status: claudeArgs.error.status, body: claudeArgs.error.body };
     }

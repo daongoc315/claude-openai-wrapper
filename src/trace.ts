@@ -1,7 +1,18 @@
 import { appendFileSync, mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 
-const SECRET_KEYS = /authorization|api[-_]?key|token|secret|password|cookie/i;
+const SAFE_METRIC_KEYS = new Set([
+  "input_tokens",
+  "output_tokens",
+  "cache_creation_input_tokens",
+  "cache_read_input_tokens",
+  "inputtokens",
+  "outputtokens",
+  "cachecreationinputtokens",
+  "cachereadinputtokens",
+  "maxoutputtokens",
+]);
+const SECRET_KEY_PATTERNS = [/^authorization$/i, /^api[-_]?key$/i, /^access[-_]?token$/i, /^refresh[-_]?token$/i, /^id[-_]?token$/i, /secret/i, /password/i, /cookie/i];
 const truthy = (value: string | undefined): boolean => value === "true" || value === "1" || value === "yes" || value === "on";
 const falsy = (value: string | undefined): boolean => value === "false" || value === "0" || value === "no" || value === "off";
 const LEVELS = { info: 0, debug: 1, trace: 2 } as const;
@@ -17,12 +28,19 @@ export const traceLevel = (): LogLevel => {
 
 export const tracePath = (): string => resolve(process.env.CLAUDE_OPENAI_LOG_FILE || process.env.CLAUDE_OPENAI_TRACE_FILE || "claude-openai.log.ndjson");
 
+const normalizedKey = (key: string): string => key.replace(/[-_]/g, "").toLowerCase();
+
+const isSecretKey = (key: string): boolean => {
+  if (SAFE_METRIC_KEYS.has(key) || SAFE_METRIC_KEYS.has(normalizedKey(key))) return false;
+  return SECRET_KEY_PATTERNS.some((pattern) => pattern.test(key));
+};
+
 const redact = (value: unknown): unknown => {
   if (Array.isArray(value)) return value.map(redact);
   if (!value || typeof value !== "object") return value;
   const output: Record<string, unknown> = {};
   for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
-    output[key] = SECRET_KEYS.test(key) ? "[REDACTED]" : redact(child);
+    output[key] = isSecretKey(key) ? "[REDACTED]" : redact(child);
   }
   return output;
 };
@@ -43,4 +61,4 @@ export const traceEvent = (event: string, payload: unknown = {}, level: LogLevel
   appendFileSync(filePath, line);
 };
 
-export const __test__ = { falsy, redact, shouldLog, traceLevel, truthy };
+export const __test__ = { falsy, isSecretKey, redact, shouldLog, traceLevel, truthy };

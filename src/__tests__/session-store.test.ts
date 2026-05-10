@@ -1,4 +1,7 @@
 import { expect, test } from "bun:test";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { appConfig } from "../config.js";
 import { SessionStore } from "../session-store.js";
 
@@ -95,5 +98,58 @@ test("maxSessions evicts oldest session and keeps newly created session", () => 
     expect(store.list()).toHaveLength(2);
   } finally {
     mutableConfig.maxSessions = originalMaxSessions;
+  }
+});
+
+test("persists claude session mappings to disk", () => {
+  const dir = mkdtempSync(join(tmpdir(), "claude-openai-session-store-"));
+  try {
+    const mapPath = join(dir, "session-map.json");
+    const store = new SessionStore(false, mapPath);
+
+    store.recordTurn("ses_abc", { claudeSessionId: "947dd76c-7dbe-433b-86d1-015663a98a93" });
+
+    expect(existsSync(mapPath)).toBe(true);
+    expect(JSON.parse(readFileSync(mapPath, "utf8"))).toEqual({
+      ses_abc: {
+        claudeSessionId: "947dd76c-7dbe-433b-86d1-015663a98a93",
+        createdAt: expect.any(String),
+        updatedAt: expect.any(String),
+        turns: 1,
+      },
+    });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("loads persisted claude session mappings", () => {
+  const dir = mkdtempSync(join(tmpdir(), "claude-openai-session-store-"));
+  try {
+    const mapPath = join(dir, "session-map.json");
+    const original = new SessionStore(false, mapPath);
+    original.recordTurn("ses_abc", { claudeSessionId: "947dd76c-7dbe-433b-86d1-015663a98a93" });
+
+    const restored = new SessionStore(false, mapPath);
+    const session = restored.getOrCreate("ses_abc");
+
+    expect(session.claudeSessionId).toBe("947dd76c-7dbe-433b-86d1-015663a98a93");
+    expect(session.turns).toBe(1);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("reset removes persisted claude session mapping", () => {
+  const dir = mkdtempSync(join(tmpdir(), "claude-openai-session-store-"));
+  try {
+    const mapPath = join(dir, "session-map.json");
+    const store = new SessionStore(false, mapPath);
+    store.recordTurn("ses_abc", { claudeSessionId: "947dd76c-7dbe-433b-86d1-015663a98a93" });
+    store.reset("ses_abc");
+
+    expect(JSON.parse(readFileSync(mapPath, "utf8"))).toEqual({});
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 });

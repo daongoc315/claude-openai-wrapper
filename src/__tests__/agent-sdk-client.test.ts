@@ -147,7 +147,7 @@ test("canUseTool captures SDK tool use as OpenAI tool call and interrupts execut
 
   const decision = await options.canUseTool?.("mcp__openai_tools__todowrite", { todos: [] }, { signal: new AbortController().signal, toolUseID: "toolu_1" });
 
-  expect(decision).toEqual({ behavior: "deny", message: "Tool call captured by OpenAI-compatible server.", interrupt: true, toolUseID: "toolu_1" });
+  expect(decision).toEqual({ behavior: "deny", message: "Tool call captured.", interrupt: true, toolUseID: "toolu_1" });
   expect(captured).toEqual([{ id: "toolu_1", type: "function", function: { name: "todowrite", arguments: "{\"todos\":[]}" } }]);
 });
 
@@ -168,4 +168,53 @@ test("canUseTool ignores non-adapter tools and does not capture incomplete adapt
   expect(nonAdapter).toEqual({ behavior: "deny", message: "Tool is not part of the OpenAI adapter: mcp__other__todowrite", toolUseID: "toolu_other" });
   expect(incomplete).toEqual({ behavior: "deny", message: "Tool call is incomplete for its OpenAI schema; retry with required arguments.", toolUseID: "toolu_empty" });
   expect(captured).toEqual([]);
+});
+
+test("session execution lock serializes matching session ids", async () => {
+  const events: string[] = [];
+  let releaseFirst!: () => void;
+  const first = __test__.withSessionExecutionLock("ses_same", async () => {
+    events.push("first:start");
+    await new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    events.push("first:end");
+    return "first";
+  });
+
+  await Promise.resolve();
+
+  const second = __test__.withSessionExecutionLock("ses_same", async () => {
+    events.push("second:start");
+    return "second";
+  });
+
+  await Promise.resolve();
+  expect(events).toEqual(["first:start"]);
+
+  releaseFirst();
+  await expect(Promise.all([first, second])).resolves.toEqual(["first", "second"]);
+  expect(events).toEqual(["first:start", "first:end", "second:start"]);
+});
+
+test("session execution lock allows different session ids concurrently", async () => {
+  const events: string[] = [];
+  let releaseFirst!: () => void;
+  const first = __test__.withSessionExecutionLock("ses_a", async () => {
+    events.push("a:start");
+    await new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    events.push("a:end");
+  });
+
+  await Promise.resolve();
+  const second = __test__.withSessionExecutionLock("ses_b", async () => {
+    events.push("b:start");
+  });
+
+  await second;
+  expect(events).toEqual(["a:start", "b:start"]);
+  releaseFirst();
+  await first;
 });
